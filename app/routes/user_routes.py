@@ -1,109 +1,106 @@
-from fastapi import APIRouter, HTTPException, Query, Response, Path
+from fastapi import APIRouter, Query, Response, Path, Depends
 from typing import Optional
 
-from app.schemas.user_schema import UserCreate, UserResponse, UserListResponse
+from app.schemas.user_schema import UserCreate, UserUpdate, UserPatch, UserResponse
+from app.services import user_service
+from app.dependencies.user_dependencies import get_user_or_404, get_api_config, verify_api_key
 
-router = APIRouter(
-    prefix="/users",
-    tags=["Users"],
-)
-
-# ── Simulated in-memory DB ────────────────────────────────────────────────────
-users_db: list[dict] = [
-    {"id": 1, "name": "Ana Torres",    "email": "ana@mail.com",    "role": "admin",   "is_active": True},
-    {"id": 2, "name": "Luis Gomez",    "email": "luis@mail.com",   "role": "support", "is_active": True},
-    {"id": 3, "name": "Maria Ruiz",    "email": "maria@mail.com",  "role": "user",    "is_active": False},
-    {"id": 4, "name": "Pedro Silva",   "email": "pedro@mail.com",  "role": "user",    "is_active": True},
-]
-_id_counter = {"value": 5}
+router = APIRouter(prefix="/users", tags=["Users"])
 
 
-# ── Helper: cabeceras personalizadas ─────────────────────────────────────────
-def set_custom_headers(response: Response) -> None:
+def set_headers(response: Response):
     response.headers["X-App-Name"]    = "device_systems"
-    response.headers["X-API-Version"] = "1.0"
+    response.headers["X-API-Version"] = "2.0"
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# GET /users  — lista completa con filtros opcionales
-# ─────────────────────────────────────────────────────────────────────────────
+# ── GET /users ────────────────────────────────────────────────────────────────
 @router.get(
     "/",
-    response_model=UserListResponse,
+    response_model=list[UserResponse],
     summary="Listar usuarios",
-    description="Retorna todos los usuarios. Permite filtrar por rol y/o estado activo.",
+    description="Retorna todos los usuarios. Filtra por rol y/o estado.",
+    response_description="Lista de usuarios",
 )
 def get_users(
     response: Response,
-    role: Optional[str] = Query(
-        default=None,
-        description="Filtrar por rol: admin | support | user",
-        enum=["admin", "support", "user"],
-    ),
-    is_active: Optional[bool] = Query(
-        default=None,
-        description="Filtrar por estado: true | false",
-    ),
+    role:      Optional[str]  = Query(None, enum=["admin", "support", "user"]),
+    is_active: Optional[bool] = Query(None),
 ):
-    set_custom_headers(response)
-    result = list(users_db)
-
-    if role is not None:
-        result = [u for u in result if u["role"] == role]
-    if is_active is not None:
-        result = [u for u in result if u["is_active"] == is_active]
-
-    return {"total": len(result), "users": result}
+    set_headers(response)
+    return user_service.get_all_users(role=role, is_active=is_active)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# GET /users/{user_id}  — buscar por ID (Path Parameter)
-# ─────────────────────────────────────────────────────────────────────────────
+# ── GET /users/{user_id} ──────────────────────────────────────────────────────
 @router.get(
     "/{user_id}",
     response_model=UserResponse,
     summary="Obtener usuario por ID",
-    description="Busca y retorna un usuario específico por su ID.",
+    description="Busca un usuario específico por su ID.",
 )
-def get_user_by_id(
+def get_user(
     response: Response,
-    user_id: int = Path(..., ge=1, description="ID del usuario (entero positivo)"),
+    user: dict = Depends(get_user_or_404),
 ):
-    set_custom_headers(response)
-    user = next((u for u in users_db if u["id"] == user_id), None)
-    if not user:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Usuario con id={user_id} no encontrado",
-        )
+    set_headers(response)
     return user
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# POST /users  — crear usuario
-# ─────────────────────────────────────────────────────────────────────────────
+# ── POST /users ───────────────────────────────────────────────────────────────
 @router.post(
     "/",
     response_model=UserResponse,
     status_code=201,
     summary="Crear usuario",
-    description="Registra un nuevo usuario. Valida datos con Pydantic y evita correos duplicados.",
+    description="Registra un nuevo usuario. Evita correos duplicados.",
 )
-def create_user(user_data: UserCreate, response: Response):
-    set_custom_headers(response)
+def create_user(data: UserCreate, response: Response):
+    set_headers(response)
+    return user_service.create_user(data)
 
-    # Verificar email duplicado
-    if any(u["email"] == user_data.email for u in users_db):
-        raise HTTPException(
-            status_code=400,
-            detail=f"El correo '{user_data.email}' ya está registrado",
-        )
 
-    new_user = {
-        "id": _id_counter["value"],
-        **user_data.model_dump(),
-    }
-    _id_counter["value"] += 1
-    users_db.append(new_user)
+# ── PUT /users/{user_id} ──────────────────────────────────────────────────────
+@router.put(
+    "/{user_id}",
+    response_model=UserResponse,
+    summary="Actualizar usuario completo",
+    description="Reemplaza TODOS los campos del usuario.",
+)
+def update_user(
+    data:     UserUpdate,
+    response: Response,
+    user_id:  int  = Path(..., ge=1),
+    _user:    dict = Depends(get_user_or_404),   # valida que exista
+):
+    set_headers(response)
+    return user_service.update_user(user_id, data)
 
-    return new_user
+
+# ── PATCH /users/{user_id} ────────────────────────────────────────────────────
+@router.patch(
+    "/{user_id}",
+    response_model=UserResponse,
+    summary="Actualizar usuario parcial",
+    description="Modifica solo los campos enviados. Mínimo 1 campo requerido.",
+)
+def patch_user(
+    data:     UserPatch,
+    response: Response,
+    user_id:  int  = Path(..., ge=1),
+    _user:    dict = Depends(get_user_or_404),
+):
+    set_headers(response)
+    return user_service.patch_user(user_id, data)
+
+
+# ── DELETE /users/{user_id} ───────────────────────────────────────────────────
+@router.delete(
+    "/{user_id}",
+    status_code=204,
+    summary="Eliminar usuario",
+    description="Elimina un usuario por ID. Retorna 204 sin contenido.",
+)
+def delete_user(
+    user_id: int  = Path(..., ge=1),
+    _user:   dict = Depends(get_user_or_404),
+):
+    user_service.delete_user(user_id)

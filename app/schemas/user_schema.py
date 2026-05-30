@@ -1,44 +1,57 @@
-from pydantic import BaseModel, EmailStr, field_validator, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import Optional
 from enum import Enum
 
 
-# ── Enum de roles permitidos ──────────────────────────────────────────────────
 class RoleEnum(str, Enum):
     admin   = "admin"
     support = "support"
     user    = "user"
 
 
-# ── Modelo de ENTRADA (lo que recibe el POST) ─────────────────────────────────
+# ── Entrada para CREATE (POST) ────────────────────────────────────────────────
 class UserCreate(BaseModel):
-    name:      str       = Field(..., min_length=3, description="Nombre completo, mínimo 3 caracteres")
-    email:     EmailStr  = Field(..., description="Correo electrónico válido")
-    role:      RoleEnum  = Field(..., description="Rol: admin | support | user")
-    is_active: bool      = Field(default=True, description="Estado activo/inactivo")
+    name:      str      = Field(..., min_length=3, description="Mínimo 3 caracteres")
+    email:     EmailStr = Field(..., description="Correo válido")
+    role:      RoleEnum = Field(..., description="admin | support | user")
+    is_active: bool     = Field(default=True)
 
     @field_validator("name")
     @classmethod
-    def name_no_spaces_only(cls, v: str) -> str:
+    def name_not_blank(cls, v: str) -> str:
         if v.strip() == "":
-            raise ValueError("El nombre no puede estar vacío o contener solo espacios")
+            raise ValueError("El nombre no puede estar vacío")
         return v.strip()
 
     model_config = {
         "json_schema_extra": {
-            "examples": [
-                {
-                    "name": "Carlos Perez",
-                    "email": "carlos@email.com",
-                    "role": "admin",
-                    "is_active": True
-                }
-            ]
+            "examples": [{
+                "name": "Sofia Leon",
+                "email": "sofia@mail.com",
+                "role": "support",
+                "is_active": True
+            }]
         }
     }
 
 
-# ── Modelo de RESPUESTA (lo que devuelve la API) ──────────────────────────────
+# ── Entrada para UPDATE completo (PUT) ───────────────────────────────────────
+class UserUpdate(BaseModel):
+    name:      str      = Field(..., min_length=3)
+    email:     EmailStr
+    role:      RoleEnum
+    is_active: bool
+
+
+# ── Entrada para UPDATE parcial (PATCH) ──────────────────────────────────────
+class UserPatch(BaseModel):
+    name:      Optional[str]      = Field(default=None, min_length=3)
+    email:     Optional[EmailStr] = None
+    role:      Optional[RoleEnum] = None
+    is_active: Optional[bool]     = None
+
+
+# ── Salida (RESPONSE) ─────────────────────────────────────────────────────────
 class UserResponse(BaseModel):
     id:        int
     name:      str
@@ -49,8 +62,8 @@ class UserResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# ── Modelo de respuesta envuelto (estandarizado) ──────────────────────────────
-class UserListResponse(BaseModel):
-    total:   int
-    users:   list[UserResponse]
-    
+# ── Respuesta de error estructurada ──────────────────────────────────────────
+class ErrorResponse(BaseModel):
+    error:       bool = True
+    message:     str
+    status_code: int

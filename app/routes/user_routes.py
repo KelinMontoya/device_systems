@@ -3,7 +3,8 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from app.schemas.user_schema import UserCreate, UserUpdate, UserPatch, UserResponse
-from app.services import user_service
+from app.schemas.loan_schema import LoanDetailResponse
+from app.services import user_service, loan_service
 from app.dependencies.database_dependency import get_db
 
 router = APIRouter(prefix="/users", tags=["Users"])
@@ -117,3 +118,18 @@ def delete_user(
     db:      Session = Depends(get_db),
 ):
     user_service.delete_user(db, user_id)
+
+
+# ── GET /users/{user_id}/loans ────────────────────────────────────────────────
+@router.get(
+    "/{user_id}/loans",
+    response_model=list[LoanDetailResponse],
+    summary="Préstamos de un usuario",
+    description="Retorna todos los préstamos asociados a un usuario, incluyendo datos del dispositivo (JOIN).",
+    responses={404: {"description": "Usuario no encontrado"}},
+)
+def get_user_loans(
+    user_id: int     = Path(..., ge=1),
+    db:      Session = Depends(get_db),
+):
+    return loan_service.get_loans_by_user(db, user_id)

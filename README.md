@@ -344,3 +344,7 @@ dispositivo válidos gracias a las claves foráneas (`ForeignKey`).
 traer información relacionada de varias tablas en una sola consulta eficiente,
 evitando hacer múltiples llamadas separadas a la base de datos y entregando al
 cliente de la API respuestas ya enriquecidas con el contexto que necesita.
+
+---
+
+*Rama de desarrollo: `device_systems_alembic_relaciones` — incorpora Alembic, modelos relacionados (Device, Loan) y consultas con joins.*

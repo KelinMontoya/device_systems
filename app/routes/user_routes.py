@@ -1,119 +1,74 @@
-from fastapi import APIRouter, Query, Response, Path, Depends
+from fastapi import APIRouter, Query, Response, Path, Depends, Request
 from typing import Optional
 from sqlalchemy.orm import Session
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.schemas.user_schema import UserCreate, UserUpdate, UserPatch, UserResponse
 from app.services import user_service
 from app.dependencies.database_dependency import get_db
+from app.dependencies.auth_dependency import get_current_active_user, require_admin
+from app.models.user_model import User
 
-router = APIRouter(prefix="/users", tags=["Users"])
-
-
-def set_headers(response: Response):
-    response.headers["X-App-Name"]    = "device_systems"
-    response.headers["X-API-Version"] = "3.0"
+limiter = Limiter(key_func=get_remote_address)
+router  = APIRouter(prefix="/users", tags=["Users"])
 
 
-# ── GET /users ────────────────────────────────────────────────────────────────
-@router.get(
-    "/",
-    response_model=list[UserResponse],
-    summary="Listar usuarios",
-    description="Retorna todos los usuarios. Filtra por rol, estado y ordena por campo.",
-    response_description="Lista de usuarios",
-)
+@router.get("/", response_model=list[UserResponse], summary="Listar usuarios")
+@limiter.limit("30/minute")
 def get_users(
-    response:  Response,
-    db:        Session = Depends(get_db),
-    role:      Optional[str]  = Query(None, enum=["admin", "support", "user"]),
+    request: Request,
+    db: Session = Depends(get_db),
+    role: Optional[str] = Query(None, enum=["admin", "support", "user"]),
     is_active: Optional[bool] = Query(None),
-    order_by:  Optional[str]  = Query("id", enum=["id", "name", "created_at"]),
+    order_by: Optional[str] = Query("id", enum=["id", "name", "created_at"]),
+    _: User = Depends(get_current_active_user),
 ):
-    set_headers(response)
     return user_service.get_all_users(db, role=role, is_active=is_active, order_by=order_by)
 
 
-# ── GET /users/{user_id} ──────────────────────────────────────────────────────
-@router.get(
-    "/{user_id}",
-    response_model=UserResponse,
-    summary="Obtener usuario por ID",
-    description="Busca un usuario específico por su ID.",
-    responses={404: {"description": "Usuario no encontrado"}},
-)
+@router.get("/{user_id}", response_model=UserResponse, summary="Obtener usuario por ID")
 def get_user(
-    response: Response,
-    user_id:  int     = Path(..., ge=1),
-    db:       Session = Depends(get_db),
+    user_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_active_user),
 ):
-    set_headers(response)
     return user_service.get_user_by_id(db, user_id)
 
 
-# ── POST /users ───────────────────────────────────────────────────────────────
-@router.post(
-    "/",
-    response_model=UserResponse,
-    status_code=201,
-    summary="Crear usuario",
-    description="Registra un nuevo usuario en la base de datos. El correo debe ser único.",
-    responses={400: {"description": "Email duplicado"}},
-)
+@router.post("/", response_model=UserResponse, status_code=201, summary="Crear usuario")
 def create_user(
-    data:     UserCreate,
-    response: Response,
-    db:       Session = Depends(get_db),
+    data: UserCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
 ):
-    set_headers(response)
     return user_service.create_user(db, data)
 
 
-# ── PUT /users/{user_id} ──────────────────────────────────────────────────────
-@router.put(
-    "/{user_id}",
-    response_model=UserResponse,
-    summary="Actualizar usuario completo",
-    description="Reemplaza TODOS los campos del usuario.",
-    responses={404: {"description": "Usuario no encontrado"}, 400: {"description": "Email duplicado"}},
-)
+@router.put("/{user_id}", response_model=UserResponse, summary="Actualizar usuario completo")
 def update_user(
-    data:     UserUpdate,
-    response: Response,
-    user_id:  int     = Path(..., ge=1),
-    db:       Session = Depends(get_db),
+    data: UserUpdate,
+    user_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
 ):
-    set_headers(response)
     return user_service.update_user(db, user_id, data)
 
 
-# ── PATCH /users/{user_id} ────────────────────────────────────────────────────
-@router.patch(
-    "/{user_id}",
-    response_model=UserResponse,
-    summary="Actualizar usuario parcial",
-    description="Modifica solo los campos enviados. Mínimo 1 campo requerido.",
-    responses={404: {"description": "Usuario no encontrado"}},
-)
+@router.patch("/{user_id}", response_model=UserResponse, summary="Actualizar usuario parcial")
 def patch_user(
-    data:     UserPatch,
-    response: Response,
-    user_id:  int     = Path(..., ge=1),
-    db:       Session = Depends(get_db),
+    data: UserPatch,
+    user_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
 ):
-    set_headers(response)
     return user_service.patch_user(db, user_id, data)
 
 
-# ── DELETE /users/{user_id} ───────────────────────────────────────────────────
-@router.delete(
-    "/{user_id}",
-    status_code=204,
-    summary="Eliminar usuario",
-    description="Elimina un usuario por ID. Retorna 204 sin contenido.",
-    responses={404: {"description": "Usuario no encontrado"}},
-)
+@router.delete("/{user_id}", status_code=204, summary="Eliminar usuario")
 def delete_user(
-    user_id: int     = Path(..., ge=1),
-    db:      Session = Depends(get_db),
+    user_id: int = Path(..., ge=1),
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
 ):
     user_service.delete_user(db, user_id)

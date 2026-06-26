@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, ConfigDict
 from typing import Optional
 from enum import Enum
 from datetime import datetime
@@ -10,11 +10,11 @@ class RoleEnum(str, Enum):
     user    = "user"
 
 
-# ── Entrada para CREATE (POST) ────────────────────────────────────────────────
 class UserCreate(BaseModel):
     name:      str      = Field(..., min_length=3, description="Mínimo 3 caracteres")
     email:     EmailStr = Field(..., description="Correo electrónico válido")
-    role:      RoleEnum = Field(..., description="admin | support | user")
+    password:  str      = Field(..., description="Contraseña segura")
+    role:      RoleEnum = Field(default=RoleEnum.user, description="admin | support | user")
     is_active: bool     = Field(default=True)
 
     @field_validator("name")
@@ -24,19 +24,13 @@ class UserCreate(BaseModel):
             raise ValueError("El nombre no puede estar vacío")
         return v.strip()
 
-    model_config = {
-        "json_schema_extra": {
-            "examples": [{
-                "name": "Sofia Leon",
-                "email": "sofia@mail.com",
-                "role": "support",
-                "is_active": True
-            }]
+    model_config = ConfigDict(
+        json_schema_extra={
+            "examples": [{"name": "Sofia Leon", "email": "sofia@mail.com", "password": "Segura123", "role": "support"}]
         }
-    }
+    )
 
 
-# ── Entrada para UPDATE completo (PUT) ───────────────────────────────────────
 class UserUpdate(BaseModel):
     name:      str      = Field(..., min_length=3)
     email:     EmailStr
@@ -44,7 +38,6 @@ class UserUpdate(BaseModel):
     is_active: bool
 
 
-# ── Entrada para UPDATE parcial (PATCH) ──────────────────────────────────────
 class UserPatch(BaseModel):
     name:      Optional[str]      = Field(default=None, min_length=3)
     email:     Optional[EmailStr] = None
@@ -52,19 +45,17 @@ class UserPatch(BaseModel):
     is_active: Optional[bool]     = None
 
 
-# ── Salida (RESPONSE) ─────────────────────────────────────────────────────────
 class UserResponse(BaseModel):
     id:         int
     name:       str
     email:      EmailStr
-    role:       RoleEnum
+    role:       str
     is_active:  bool
     created_at: Optional[datetime] = None
 
-    model_config = {"from_attributes": True}
+    model_config = ConfigDict(from_attributes=True)
 
 
-# ── Respuesta de error estructurada ──────────────────────────────────────────
 class ErrorResponse(BaseModel):
     error:       bool = True
     message:     str

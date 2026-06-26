@@ -1,6 +1,8 @@
-# device_systems API — v3.0 (SQLAlchemy + SQLite)
+# device_systems — v4.0 (Security Branch)
 
-API REST para gestión de usuarios construida con **FastAPI**, **SQLAlchemy** y **SQLite**.
+API REST segura para gestión de **usuarios**, **dispositivos** y **préstamos**, construida con FastAPI + SQLAlchemy + SQLite.
+
+Esta versión agrega sobre la v3.0 una capa completa de seguridad: autenticación JWT, hash de contraseñas, protección de rutas por roles, middleware personalizado, CORS, rate limiting y validaciones avanzadas con Pydantic v2.
 
 ---
 
@@ -9,28 +11,42 @@ API REST para gestión de usuarios construida con **FastAPI**, **SQLAlchemy** y 
 ```
 device_systems/
 │── app/
-│   │── main.py                          # Punto de entrada, crea tablas al iniciar
-│   │
+│   │── main.py
+│   │── auth/
+│   │   │── auth_routes.py       # POST /auth/register, /login, GET /auth/me
+│   │   │── auth_service.py      # Lógica de registro y autenticación
+│   │   │── security.py          # Hash bcrypt, creación y validación JWT
 │   │── database/
-│   │   └── connection.py                # engine, SessionLocal, Base
-│   │
+│   │   │── connection.py        # SQLAlchemy engine + SessionLocal + Base
 │   │── models/
-│   │   └── user_model.py                # Modelo SQLAlchemy (tabla users)
-│   │
+│   │   │── user_model.py        # Tabla users (incluye hashed_password, role)
+│   │   │── device_model.py      # Tabla devices
+│   │   │── loan_model.py        # Tabla loans (FK users + devices)
 │   │── schemas/
-│   │   └── user_schema.py               # Schemas Pydantic (entrada/salida)
-│   │
+│   │   │── auth_schema.py       # UserRegister, UserLogin, Token, TokenData
+│   │   │── user_schema.py       # UserCreate, UserUpdate, UserPatch, UserResponse
+│   │   │── device_schema.py     # DeviceCreate/Update/Patch/Response
+│   │   │── loan_schema.py       # LoanCreate, LoanResponse, LoanDetail
 │   │── routes/
-│   │   └── user_routes.py               # Endpoints del recurso /users
-│   │
+│   │   │── user_routes.py       # CRUD /users (protegido)
+│   │   │── device_routes.py     # CRUD /devices (protegido por rol)
+│   │   │── loan_routes.py       # CRUD /loans (protegido)
 │   │── services/
-│   │   └── user_service.py              # Lógica CRUD con base de datos
-│   │
-│   └── dependencies/
-│       └── database_dependency.py       # Dependencia get_db() para sesiones
-│
+│   │   │── user_service.py
+│   │   │── device_service.py
+│   │   │── loan_service.py
+│   │── dependencies/
+│   │   │── database_dependency.py   # get_db()
+│   │   │── auth_dependency.py       # get_current_user, require_admin, etc.
+│   │── middlewares/
+│   │   │── request_middleware.py    # X-Process-Time, X-App-Name, X-Request-ID
+│── alembic/
+│   │── versions/                    # Migración generada automáticamente
+│── .env
+│── .env.example
+│── alembic.ini
 │── requirements.txt
-└── README.md
+│── README.md
 ```
 
 ---
@@ -38,115 +54,225 @@ device_systems/
 ## Instalación y ejecución
 
 ```bash
+# Clonar el repo y entrar al directorio
+git clone https://github.com/KelinMontoya/device_systems
+cd device_systems
+git checkout device_systems_security
+
+# Crear entorno virtual e instalar dependencias
+python -m venv venv
+venv\Scripts\activate          # Windows
+# source venv/bin/activate     # Linux/Mac
+
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+
+# Copiar variables de entorno
+copy .env.example .env         # Windows
+# cp .env.example .env         # Linux/Mac
+# (Editar SECRET_KEY en .env)
+
+# Aplicar migraciones Alembic
+python -m alembic upgrade head
+
+# Iniciar servidor
+python -m uvicorn app.main:app --reload
 ```
 
-Documentación disponible en:
-- **Swagger UI:** http://localhost:8000/docs
-- **ReDoc:** http://localhost:8000/redoc
+Documentación Swagger disponible en: `http://localhost:8000/docs`
 
 ---
 
-## Endpoints disponibles
+## Variables de entorno (.env)
 
-| Método | Ruta              | Descripción                        | Código |
-|--------|-------------------|------------------------------------|--------|
-| GET    | /users            | Listar usuarios (filtros opcionales)| 200   |
-| GET    | /users/{id}       | Buscar usuario por ID              | 200    |
-| POST   | /users            | Crear nuevo usuario                | 201    |
-| PUT    | /users/{id}       | Actualizar usuario completo        | 200    |
-| PATCH  | /users/{id}       | Actualizar usuario parcial         | 200    |
-| DELETE | /users/{id}       | Eliminar usuario                   | 204    |
-
-### Parámetros de filtro en GET /users
-- `role`: admin | support | user
-- `is_active`: true | false
-- `order_by`: id | name | created_at
+```env
+SECRET_KEY=tu_clave_secreta_muy_segura
+ALGORITHM=HS256
+ACCESS_TOKEN_EXPIRE_MINUTES=30
+DATABASE_URL=sqlite:///./device_systems.db
+```
 
 ---
 
-### CAPTURAS
+## Migración Alembic aplicada
 
-## Estructura del proyecto
+```
+INFO  [alembic.autogenerate] Detected added table 'devices'
+INFO  [alembic.autogenerate] Detected added table 'loans'
+INFO  [alembic.autogenerate] Detected added column 'users.hashed_password'
+Running upgrade -> 496a79d7c403, add_authentication_fields_devices_loans
+```
 
-## Estructura del proyecto
-![Estructura](app/capturas/estructura.png)
+---
 
-## Base de datos - Tabla users
-![Tabla users](app/capturas/Tabla_users.png)
+## Endpoints y protección por roles
 
-## Swagger UI - Página principal
-![Swagger](app/capturas/Pagina_principal.png)
+| Método | Ruta | Protección |
+|--------|------|-----------|
+| POST | /auth/register | Pública (rate limit: 3/min) |
+| POST | /auth/login | Pública (rate limit: 5/min) |
+| GET | /auth/me | Token válido |
+| GET | /users/ | Usuario autenticado (rate limit: 30/min) |
+| GET | /users/{id} | Usuario autenticado |
+| POST | /users/ | Solo admin |
+| PUT | /users/{id} | Solo admin |
+| DELETE | /users/{id} | Solo admin |
+| GET | /devices/ | Admin o support |
+| POST | /devices/ | Admin o support |
+| PUT/PATCH | /devices/{id} | Admin o support |
+| DELETE | /devices/{id} | Solo admin |
+| GET | /loans/ | Usuario autenticado |
+| POST | /loans/ | Usuario autenticado (rate limit: 10/min) |
+| GET | /loans/details | Admin o support |
+| PATCH | /loans/{id}/return | Admin o support |
 
-## Endpoints
-![Endpoints](app/capturas/Endpoints.png)
+---
 
-## Prueba 1 - Crear usuario válido
-![Crear usuario](app/capturas/1.png)
+## Pruebas funcionales
 
-## Prueba 2 - Email duplicado (error 400)
-![Email duplicado](app/capturas/2.png)
+### 1. Registro exitoso
+```
+POST /auth/register
+{"name":"Admin SENA","email":"admin@sena.edu.co","password":"Admin1234","role":"admin"}
+→ 201 {"id":1,"name":"Admin SENA","email":"admin@sena.edu.co","role":"admin","is_active":true}
+```
 
-## Prueba 3 - Listar usuarios
-![Listar usuarios](app/capturas/3.png)
+### 2. Contraseña débil (Pydantic v2 field_validator)
+```
+POST /auth/register  {"password":"1234", ...}
+→ 422 {"detail":[{"msg":"Value error, La contraseña debe tener al menos 8 caracteres"}]}
+```
 
-## Prueba 4 - Buscar por ID
-![Buscar por ID](app/capturas/4.png)
+### 3. Email duplicado
+```
+POST /auth/register  (mismo email)
+→ 400 {"detail":"El correo 'admin@sena.edu.co' ya está registrado"}
+```
 
-## Prueba 5 - Usuario no encontrado (error 404)
-![Usuario no encontrado](app/capturas/5.png)
+### 4. Login correcto — token JWT generado
+```
+POST /auth/login  username=admin@sena.edu.co  password=Admin1234
+→ 200 {"access_token":"eyJhbGci...","token_type":"bearer"}
+```
 
-## Prueba 6 - Filtrar por rol
-![Filtrar por rol](app/capturas/6.png)
+### 5. Login con contraseña incorrecta
+```
+POST /auth/login  password=wrong
+→ 401 {"detail":"Credenciales incorrectas"}
+```
 
-## Prueba 7 - Filtrar por estado
-![Filtrar activos](app/capturas/7.png)
+### 6. GET /auth/me
+```
+GET /auth/me  Authorization: Bearer <token>
+→ 200 {"id":1,"name":"Admin SENA","email":"admin@sena.edu.co","role":"admin",...}
+  (hashed_password NO aparece en la respuesta)
+```
 
-## Prueba 8 - PUT actualización completa
-![PUT](app/capturas/8.png)
+### 7. Acceso a ruta protegida sin token
+```
+GET /users/
+→ 401 {"detail":"Not authenticated"}
+```
 
-## Prueba 9 - PATCH actualización parcial
-![PATCH](app/capturas/9.png)
+### 8. Token inválido
+```
+GET /users/  Authorization: Bearer token_falso
+→ 401 {"detail":"Token inválido o expirado"}
+```
 
-## Prueba 10 - DELETE eliminar usuario
-![DELETE](app/capturas/10.png)
+### 9. Usuario sin permisos (support intenta DELETE)
+```
+DELETE /devices/1  Authorization: Bearer <token_support>
+→ 403 {"detail":"Se requiere rol admin"}
+```
 
-## Prueba 11 - Verificar usuario eliminado
-![Verificar eliminado](app/capturas/11.png)
+### 10. Creación de dispositivo con rol permitido
+```
+POST /devices/  Authorization: Bearer <token_admin>
+{"name":"MacBook","serial":"SN002","brand":"Apple","device_type":"laptop"}
+→ 201 {"id":2,"name":"MacBook","serial":"SN002",...}
+```
 
+### 11. Cabeceras del middleware
+```
+GET /
+→ Headers:
+  X-App-Name: device_systems
+  X-Process-Time: 0.004263
+  X-Request-ID: b255159d
+```
 
+### 12. Rate limiting activado
+```
+POST /auth/login  (6 veces seguidas, límite: 5/min)
+Petición 1: 200 OK
+Petición 2: 200 OK
+Petición 3: 429 Too Many Requests ← RATE LIMIT ACTIVO
+Petición 4: 429 Too Many Requests
+...
+```
 
-### Diferencia entre Modelo SQLAlchemy y Schema Pydantic
-# Modelo SQLAlchemy (app/models/user_model.py)
-- El modelo SQLAlchemy representa la tabla real en la base de datos. Es la clase que le dice a SQLAlchemy cómo crear la tabla users, qué columnas tiene, qué tipo de dato es cada una y qué restricciones aplica (por ejemplo que el email sea único o que el nombre no pueda estar vacío).
-En otras palabras, el modelo es el "plano" de la tabla en la base de datos.
-pythonclass User(Base):
-    __tablename__ = "users"
-    id        = Column(Integer, primary_key=True)
-    name      = Column(String, nullable=False)
-    email     = Column(String, unique=True, nullable=False)
-    role      = Column(String, nullable=False)
-    is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+---
 
-# Schema Pydantic (app/schemas/user_schema.py)
-- El schema Pydantic se encarga de validar los datos que entran y salen de la API. Cuando alguien hace un POST, Pydantic revisa que el email tenga formato válido, que el nombre tenga mínimo 3 caracteres y que el rol sea uno de los permitidos. Si algo falla, la API responde automáticamente con un error 422.
-En otras palabras, el schema es el "guardián" de los datos en la API.
-pythonclass UserCreate(BaseModel):
-    name:      str      = Field(..., min_length=3)
-    email:     EmailStr
-    role:      RoleEnum
-    is_active: bool = True
+## CORS — Explicación
 
-# Tabla comparativa
-Aspecto          | Modelo SQLAlchemy                   | Schema Pydantic
-¿Para qué sirve? | Representa la tabla en la BD        | Valida datos de la API
-¿Dónde actúa?    | En la base de datos                 | En el request y response
-¿Qué valida?     | Constraints de BD(unique, nullable) | Reglas de negocio (min_length, email)
-¿Quién lo usa?   | SQLAlchemy (ORM)                    | FastAPI (endpoints)
+La API tiene CORS configurado para dos orígenes locales de desarrollo:
 
-### Reflexión final sobre persistencia
-Antes, los usuarios se guardaban en una lista de Python. Eso significa que cada vez que se reiniciaba el servidor, todos los datos se perdían. Con SQLAlchemy y SQLite, los datos quedan guardados en un archivo real (device_systems.db) y sobreviven al reinicio del servidor.
-Además, la base de datos garantiza la integridad de los datos por su cuenta: aunque el código tuviera un error, la BD nunca permitiría dos usuarios con el mismo email gracias al constraint unique=True. Eso hace la aplicación mucho más confiable y lista para un entorno real.
-Usar un ORM como SQLAlchemy también permite trabajar con objetos Python en lugar de escribir SQL directamente, lo que hace el código más limpio, más fácil de mantener y menos propenso a errores.
+```python
+allow_origins=[
+    "http://localhost:5173",   # Vite / React
+    "http://localhost:3000",   # Create React App / Next.js
+],
+allow_credentials=True,
+allow_methods=["*"],
+allow_headers=["*"],
+```
+
+### ¿Por qué NO se recomienda usar `"*"` en producción con credenciales?
+
+Cuando `allow_credentials=True`, el navegador exige que `allow_origins` contenga URLs específicas, no `"*"`. Si se usa `allow_origins=["*"]` con credenciales, el navegador rechaza la respuesta por política de seguridad CORS y los tokens/cookies no se transmiten.
+
+Además, permitir cualquier origen (`"*"`) en producción expone la API a solicitudes cruzadas desde sitios maliciosos (ataques CSRF), permitiéndoles hacer peticiones autenticadas en nombre del usuario. En producción siempre se deben listar únicamente los dominios del frontend oficial.
+
+---
+
+## Hash de contraseñas con passlib + bcrypt
+
+```python
+from passlib.context import CryptContext
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+```
+
+- Las contraseñas **nunca se almacenan en texto plano**.
+- bcrypt aplica salt automático y es resistente a ataques de fuerza bruta.
+- El campo `hashed_password` **nunca aparece en los schemas de respuesta**.
+
+---
+
+## Autenticación OAuth2 + JWT
+
+1. El usuario hace `POST /auth/login` con email y password.
+2. La API verifica la contraseña contra el hash en BD con `passlib`.
+3. Si es válida, genera un token JWT firmado con `python-jose` usando `SECRET_KEY`.
+4. El cliente envía el token en cada petición: `Authorization: Bearer <token>`.
+5. La dependencia `get_current_user` decodifica el token y carga el usuario de BD.
+
+---
+
+## Reflexión — Importancia de la seguridad en APIs REST
+
+Una API sin seguridad expone datos sensibles, permite manipulación de registros por cualquier cliente y puede ser víctima de ataques automatizados. En esta actividad se aplicaron capas de protección complementarias:
+
+- **JWT** evita que sesiones sean robadas o falsificadas sin la clave secreta.
+- **bcrypt** protege las contraseñas incluso si la base de datos es comprometida.
+- **Autorización por roles** garantiza que cada usuario solo pueda hacer lo que corresponde a su perfil.
+- **Rate limiting** previene ataques de fuerza bruta sobre el login.
+- **Middleware de trazabilidad** permite auditar cada petición recibida.
+- **CORS restrictivo** evita que sitios externos consuman la API sin autorización.
+
+La seguridad no es opcional en una API REST profesional: es parte del diseño desde el primer día.

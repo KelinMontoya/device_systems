@@ -1,18 +1,16 @@
+import os
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, declarative_base
+from dotenv import load_dotenv
 
-# URL de la base de datos SQLite
-DATABASE_URL = "sqlite:///./device_systems.db"
+load_dotenv()
 
-# Motor de base de datos
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./device_systems.db")
+
 engine = create_engine(
     DATABASE_URL,
-    connect_args={"check_same_thread": False}  # Necesario para SQLite con FastAPI
+    connect_args={"check_same_thread": False}
 )
 
-# Fábrica de sesiones
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Base declarativa para los modelos
 Base = declarative_base()
